@@ -5,12 +5,12 @@ import string
 from flask import Flask, request
 from pymongo import MongoClient
 
-# --- الإعدادات الخاصة بك ---
+# --- الإعدادات الخاصة بك (تم التحديث) ---
 API_TOKEN = '8070560190:AAFjbU4sfFLjS77uE4X_csCG-T71za3eAvg'
 ADMIN_ID = 8305841557
 MONGO_URI = 'mongodb+srv://mfasd94_db_user:umLYtGDdobe1HGBt@cluster0.ss2d7fa.mongodb.net/?appName=Cluster0'
-# ⚠️ ملاحظة: استبدل 'your-app-name' برابط Render الذي ستحصل عليه لاحقاً
-WEBHOOK_URL = 'https://your-app-name.onrender.com/' 
+# الرابط الجديد الخاص بك على Render
+WEBHOOK_URL = 'https://my-architect-bot-1.onrender.com/' 
 
 bot = telebot.TeleBot(API_TOKEN)
 app = Flask(__name__)
@@ -38,9 +38,10 @@ def main_markup():
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
+    # حفظ المستخدم في قاعدة البيانات تلقائياً
     users_col.update_one({'id': user_id}, {'$set': {'id': user_id}}, upsert=True)
     
-    welcome_text = "─── ❖ ── ✦ ── ❖ ───\n🌐 **ARCHITECT OS v3.0 ONLINE**\n─── ❖ ── ✦ ── ❖ ───\n\nمرحباً بك في النظام المركزي.\nتم التوصيل بقاعدة البيانات السحابية... ✅"
+    welcome_text = "─── ❖ ── ✦ ── ❖ ───\n🌐 **ARCHITECT OS v3.0 ONLINE**\n─── ❖ ── ✦ ── ❖ ───\n\nمرحباً بك في النظام المركزي.\nتم التوصيل بقاعدة البيانات السحابية بنجاح... ✅"
     bot.send_message(message.chat.id, welcome_text, reply_markup=main_markup(), parse_mode="Markdown")
 
 # --- نظام الإذاعة (Broadcast) ---
@@ -73,7 +74,7 @@ def vip_access(message):
     if vip_users_col.find_one({'user_id': user_id}):
         bot.send_message(message.chat.id, "🔥 مرحباً بك في المحتوى الحصري VIP.")
     else:
-        msg = bot.send_message(message.chat.id, "🔐 القسم مشفر. أدخل كود الوصول:")
+        msg = bot.send_message(message.chat.id, "🔐 القسم مشفر. أدخل كود الوصول الخاص بك:")
         bot.register_next_step_handler(msg, process_vip)
 
 def process_vip(message):
@@ -82,9 +83,9 @@ def process_vip(message):
     if valid:
         vip_codes_col.update_one({'code': code}, {'$set': {'used': 1}})
         vip_users_col.insert_one({'user_id': message.from_user.id})
-        bot.send_message(message.chat.id, "✅ تم تفعيل العضوية بنجاح.")
+        bot.send_message(message.chat.id, "✅ تم تفعيل العضوية! يمكنك الآن دخول قسم VIP.")
     else:
-        bot.send_message(message.chat.id, "❌ الكود غير صحيح.")
+        bot.send_message(message.chat.id, "❌ الكود غير صحيح أو تم استخدامه.")
 
 # --- لوحة التحكم ---
 @bot.message_handler(commands=['admin'])
@@ -93,8 +94,8 @@ def admin(message):
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("💎 توليد كود VIP", callback_data="gen_vip"))
         markup.add(types.InlineKeyboardButton("📢 إذاعة جماعية", callback_data="broadcast"))
-        markup.add(types.InlineKeyboardButton("📊 إحصائيات", callback_data="stats"))
-        bot.send_message(message.chat.id, "👑 لوحة تحكم القائد:", reply_markup=markup)
+        markup.add(types.InlineKeyboardButton("📊 إحصائيات النظام", callback_data="stats"))
+        bot.send_message(message.chat.id, "👑 لوحة تحكم القائد (The Architect):", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: True)
 def callbacks(call):
@@ -102,14 +103,15 @@ def callbacks(call):
         if call.data == "gen_vip":
             code = generate_random_code()
             vip_codes_col.insert_one({'code': code, 'used': 0})
-            bot.send_message(ADMIN_ID, f"✅ كود جديد:\n`{code}`", parse_mode="Markdown")
+            bot.send_message(ADMIN_ID, f"✅ تم إنشاء كود جديد:\n`{code}`", parse_mode="Markdown")
         elif call.data == "stats":
             count = users_col.count_documents({})
-            bot.answer_callback_query(call.id, f"عدد المستخدمين: {count}", show_alert=True)
+            bot.answer_callback_query(call.id, f"عدد المستخدمين في النظام: {count}", show_alert=True)
 
 # --- Flask Webhook ---
 @app.route('/', methods=['GET'])
-def home(): return "SYSTEM ONLINE ✅"
+def home(): 
+    return "ARCHITECT SYSTEM ONLINE ✅"
 
 @app.route('/', methods=['POST'])
 def webhook():
@@ -120,7 +122,10 @@ def webhook():
         return "OK", 200
     return "Forbidden", 403
 
+# --- التشغيل ---
 if __name__ == "__main__":
     bot.remove_webhook()
+    # ربط البوت برابط الـ Webhook الخاص بـ Render
     bot.set_webhook(url=WEBHOOK_URL)
     app.run(host="0.0.0.0", port=10000)
+
