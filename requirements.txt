@@ -1,0 +1,5 @@
+pyTelegramBotAPI
+flask
+pymongo
+dnspython
+web: python main.py
