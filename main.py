@@ -18,8 +18,8 @@ app = Flask(__name__)
 client = MongoClient(MONGO_URI)
 db = client['bot_database']
 users_col = db['users']
-content_col = db['dynamic_content'] # لتخزين البوتات والأدوات والشروحات
-vip_codes_col = db['vip_codes']     # لتخزين أكواد VIP
+content_col = db['dynamic_content']
+vip_codes_col = db['vip_codes']
 
 # --- قوائم الأقسام ---
 def main_markup():
@@ -30,7 +30,6 @@ def main_markup():
     return markup
 
 def vip_markup():
-    # القائمة الداخلية لقسم VIP
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add('🔹 أفضل بوتات الأرقام الفيك')
     markup.add('🔹 أدوات Python وTermux الاحترافية')
@@ -50,19 +49,15 @@ def admin_markup():
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
-    # تسجيل المستخدم وتفعيل حالة VIP الافتراضية (False)
     users_col.update_one({'id': user_id}, {'$setOnInsert': {'id': user_id, 'is_vip': False}}, upsert=True)
-    
     welcome = "─── ❖ ── ✦ ── ❖ ───\n🌐 **ARCHITECT OS v4.0 ONLINE**\n─── ❖ ── ✦ ── ❖ ───\n\nنظام الإدارة المركزية جاهز للعمل.\nاختر القسم الذي تريده من القائمة أدناه 👇"
     bot.send_message(message.chat.id, welcome, reply_markup=main_markup(), parse_mode="Markdown")
 
-# --- قسم المطور ---
 @bot.message_handler(func=lambda m: m.text == '👨‍💻 المطور')
 def developer(message):
     bot.send_message(message.chat.id, "👨‍💻 **المطور:**\n@SDVee249", parse_mode="Markdown")
 
-# --- عرض المحتوى (العام و VIP) ---
-# قائمة بأسماء الأقسام المسموح بها
+# --- قائمة بجميع الأقسام ---
 all_categories = [
     '🔢 قسم الأرقام', 
     '💻 أدوات الترمكس', 
@@ -73,68 +68,92 @@ all_categories = [
     '🔹 شروحات الذكاء الاصطناعي'
 ]
 
+# --- دالة عرض المحتوى (تم تحديثها بالكامل لإصلاح مشكلة العرض) ---
 @bot.message_handler(func=lambda m: m.text in all_categories)
 def show_content(message):
-    category = message.text
-    # جلب جميع العناصر الخاصة بهذا القسم
-    items = content_col.find({'category': category}).sort('_id', -1)
-    
-    if items.count() == 0:
-        bot.send_message(message.chat.id, "⚠️ لا يوجد محتوى مضاف في هذا القسم حالياً.")
-        return
-
-    for item in items:
-        # تجهيز النص
-        text = f"🔹 **{item['name']}**\n──────────────────\n{item['details']}"
+    try:
+        category = message.text
         
-        # التحقق مما إذا كان هناك فيديو
-        if item.get('video_id'):
-            try:
-                bot.send_video(message.chat.id, item['video_id'], caption=text, parse_mode="Markdown")
-            except Exception as e:
-                # في حال لم يتمكن البوت من إرسال الفيديو (ربما تم حذفه من سيرفر تيليجرام)
-                bot.send_message(message.chat.id, text + "\n\n(⚠️ الفيديو غير متاح)", parse_mode="Markdown")
-        else:
-            bot.send_message(message.chat.id, text, parse_mode="Markdown")
+        # 1. رسالة تحميل مؤقتة
+        loading_msg = bot.send_message(message.chat.id, f"⏳ جاري البحث في {category}...")
+        
+        # 2. تحويل المؤشر إلى قائمة (list) لضمان جلب البيانات بالكامل قبل العرض
+        # هذا هو الحل الأساسي لمشكلة عدم ظهور البيانات
+        items = list(content_col.find({'category': category}).sort('_id', -1))
+        
+        # 3. حذف رسالة التحميل
+        try:
+            bot.delete_message(message.chat.id, loading_msg.message_id)
+        except:
+            pass
+            
+        if not items:
+            bot.send_message(message.chat.id, "⚠️ لا يوجد محتوى مضاف في هذا القسم حالياً.")
+            return
+
+        # 4. عرض العناصر واحداً تلو الآخر
+        for item in items:
+            name = item.get('name', 'غير مسمى')
+            details = item.get('details', 'لا توجد تفاصيل')
+            
+            # إزالة رموز التنسيق من النص لتجنب الأخطاء
+            text = f"🔹 الاسم: {name}\n──────────────────\n{details}"
+            
+            video_id = item.get('video_id')
+            
+            if video_id:
+                try:
+                    bot.send_video(message.chat.id, video_id, caption=text)
+                except Exception as e:
+                    bot.send_message(message.chat.id, text + f"\n\n(⚠️ الفيديو غير متاح أو تم حذفه)")
+            else:
+                bot.send_message(message.chat.id, text)
+                
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ حدث خطأ أثناء جلب البيانات:\n{str(e)}")
 
 # --- منطق قسم VIP ---
 @bot.message_handler(func=lambda m: m.text == '💎 قسم VIP')
 def vip_section(message):
-    user_id = message.from_user.id
-    user = users_col.find_one({'id': user_id})
-    
-    if user.get('is_vip', False):
-        bot.send_message(message.chat.id, "📩 مرحباً بك في قسم VIP 🔐\nاختر القسم الذي تريده:", reply_markup=vip_markup())
-    else:
-        msg = bot.send_message(message.chat.id, "🔒 **قسم VIP مغلق**\nهذا القسم خاص بحاملي عضوية VIP.\nيرجى إرسال كود الاشتراك للدخول:")
-        bot.register_next_step_handler(msg, check_vip_code)
+    try:
+        user_id = message.from_user.id
+        user = users_col.find_one({'id': user_id})
+        
+        if user and user.get('is_vip', False):
+            bot.send_message(message.chat.id, "📩 مرحباً بك في قسم VIP 🔐\nاختر القسم الذي تريده:", reply_markup=vip_markup())
+        else:
+            msg = bot.send_message(message.chat.id, "🔒 **قسم VIP مغلق**\nهذا القسم خاص بحاملي عضوية VIP.\nيرجى إرسال كود الاشتراك للدخول:")
+            bot.register_next_step_handler(msg, check_vip_code)
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Error: {e}")
 
 def check_vip_code(message):
-    code = message.text.strip()
-    valid_code = vip_codes_col.find_one({'code': code, 'active': True})
-    
-    if valid_code:
-        # تفعيل العضوية للمستخدم
-        users_col.update_one({'id': message.from_user.id}, {'$set': {'is_vip': True}})
-        bot.send_message(message.chat.id, "✅ **الكود صحيح!**\nتم تفعيل العضوية الذهبية بنجاح.\nأهلاً بك في العالم الحصري 👑", reply_markup=vip_markup(), parse_mode="Markdown")
-    else:
-        bot.send_message(message.chat.id, "❌ **الكود غير صحيح** أو تم استخدامه مسبقاً.", reply_markup=main_markup())
+    try:
+        code = message.text.strip()
+        valid_code = vip_codes_col.find_one({'code': code, 'active': True})
+        
+        if valid_code:
+            users_col.update_one({'id': message.from_user.id}, {'$set': {'is_vip': True}})
+            bot.send_message(message.chat.id, "✅ **الكود صحيح!**\nتم تفعيل العضوية الذهبية بنجاح.\nأهلاً بك في العالم الحصري 👑", reply_markup=vip_markup(), parse_mode="Markdown")
+        else:
+            bot.send_message(message.chat.id, "❌ **الكود غير صحيح** أو تم استخدامه مسبقاً.", reply_markup=main_markup())
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Error: {e}")
 
 @bot.message_handler(func=lambda m: m.text == '🔙 رجوع للقائمة الرئيسية')
 def back_to_main(message):
     bot.send_message(message.chat.id, "🏠 عودة للقائمة الرئيسية", reply_markup=main_markup())
 
-# --- لوحة التحكم (للأدمن فقط) ---
+# --- لوحة التحكم ---
 @bot.message_handler(commands=['admin'])
 def admin(message):
     if message.from_user.id == ADMIN_ID:
         bot.send_message(message.chat.id, "👑 **لوحة تحكم النظام**\nاختر العملية:", reply_markup=admin_markup(), parse_mode="Markdown")
 
-# --- عمليات الإضافة (مع دعم الفيديو) ---
+# --- إضافة المحتوى ---
 @bot.callback_query_handler(func=lambda call: call.data == "add_content")
 def add_content_step1(call):
     markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-    # عرض كل الأقسام العامة والخاصة للإضافة عليها
     markup.add('🔢 قسم الأرقام', '💻 أدوات الترمكس', '🐍 دروس بايثون')
     markup.add('📚 شروحات تقنية', '🔹 أفضل بوتات الأرقام الفيك')
     markup.add('🔹 أدوات Python وTermux الاحترافية', '🔹 شروحات الذكاء الاصطناعي')
@@ -162,21 +181,22 @@ def add_content_step4(message, category, name):
     bot.register_next_step_handler(msg, add_content_step5, category, name, details)
 
 def add_content_step5(message, category, name, details):
-    video_id = None
-    if message.video:
-        video_id = message.video.file_id
-    elif message.text.lower() != 'skip':
-        # إذا أرسل نصاً وليس skip، نعتبره خطأ ونكمل بدون فيديو مع تنبيه بسيط في الكونسول أو تجاهله
-        pass 
-    
-    content_col.insert_one({
-        'category': category,
-        'name': name,
-        'details': details,
-        'video_id': video_id
-    })
-    
-    bot.send_message(message.chat.id, "✅ **تم إضافة المحتوى بنجاح!**\nتم ربطه بقاعدة البيانات.", reply_markup=main_markup(), parse_mode="Markdown")
+    try:
+        video_id = None
+        if message.video:
+            video_id = message.video.file_id
+        # إذا لم يكن فيديو ولا كلمة skip، نتخطى الفيديو
+        
+        content_col.insert_one({
+            'category': category,
+            'name': name,
+            'details': details,
+            'video_id': video_id
+        })
+        
+        bot.send_message(message.chat.id, "✅ **تم إضافة المحتوى بنجاح!**", reply_markup=main_markup(), parse_mode="Markdown")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ فشل الحفظ: {e}")
 
 # --- إدارة أكواد VIP ---
 @bot.callback_query_handler(func=lambda call: call.data == "manage_vip")
@@ -189,21 +209,26 @@ def manage_vip_menu(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == "gen_vip")
 def generate_vip_code(call):
-    # توليد كود عشوائي مكون من 6 أحرف وأرقام
-    code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-    vip_codes_col.insert_one({'code': code, 'active': True})
-    bot.send_message(call.message.chat.id, f"✅ تم إنشاء كود جديد:\n\n🔑 `{code}`\n\nانسخه وأعطه للمشتركين.", parse_mode="Markdown")
+    try:
+        code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        vip_codes_col.insert_one({'code': code, 'active': True})
+        bot.send_message(call.message.chat.id, f"✅ تم إنشاء كود جديد:\n\n🔑 `{code}`", parse_mode="Markdown")
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"Error: {e}")
 
 @bot.callback_query_handler(func=lambda call: call.data == "list_vip")
 def list_vip_codes(call):
-    codes = vip_codes_col.find({'active': True})
-    text = "📋 **الأكواد النشطة حالياً:**\n\n"
-    has_codes = False
-    for c in codes:
-        text += f"🔑 `{c['code']}`\n"
-        has_codes = True
-    if not has_codes: text = "لا توجد أكواد نشطة."
-    bot.send_message(call.message.chat.id, text, parse_mode="Markdown")
+    try:
+        codes = vip_codes_col.find({'active': True})
+        text = "📋 **الأكواد النشطة:**\n\n"
+        has_codes = False
+        for c in codes:
+            text += f"🔑 `{c['code']}`\n"
+            has_codes = True
+        if not has_codes: text = "لا توجد أكواد نشطة."
+        bot.send_message(call.message.chat.id, text, parse_mode="Markdown")
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"Error: {e}")
 
 @bot.callback_query_handler(func=lambda call: call.data == "del_vip_prompt")
 def delete_vip_code_prompt(call):
@@ -211,35 +236,44 @@ def delete_vip_code_prompt(call):
     bot.register_next_step_handler(msg, delete_vip_code_action)
 
 def delete_vip_code_action(message):
-    code = message.text.strip()
-    res = vip_codes_col.delete_one({'code': code})
-    if res.deleted_count > 0:
-        bot.send_message(message.chat.id, "✅ تم حذف الكود بنجاح.")
-    else:
-        bot.send_message(message.chat.id, "❌ الكود غير موجود.")
+    try:
+        code = message.text.strip()
+        res = vip_codes_col.delete_one({'code': code})
+        if res.deleted_count > 0:
+            bot.send_message(message.chat.id, "✅ تم حذف الكود.")
+        else:
+            bot.send_message(message.chat.id, "❌ الكود غير موجود.")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Error: {e}")
 
-# --- نظام الإذاعة الشاملة (Broadcast) ---
+# --- الإذاعة ---
 @bot.callback_query_handler(func=lambda call: call.data == "broadcast")
 def broadcast_prompt(call):
-    msg = bot.send_message(call.message.chat.id, "📢 أرسل الرسالة التي تريد بثها للجميع (نص، صورة، أو فيديو):")
+    msg = bot.send_message(call.message.chat.id, "📢 أرسل الرسالة التي تريد بثها:")
     bot.register_next_step_handler(msg, broadcast_send)
 
 def broadcast_send(message):
-    users = users_col.find({})
-    count = 0
-    for user in users:
-        try:
-            bot.copy_message(user['id'], message.chat.id, message.message_id)
-            count += 1
-        except: continue
-    bot.send_message(ADMIN_ID, f"🚀 تمت الإذاعة بنجاح لـ {count} مستخدم.")
+    try:
+        users = users_col.find({})
+        count = 0
+        for user in users:
+            try:
+                bot.copy_message(user['id'], message.chat.id, message.message_id)
+                count += 1
+            except: continue
+        bot.send_message(ADMIN_ID, f"🚀 تمت الإذاعة لـ {count} مستخدم.")
+    except Exception as e:
+        bot.send_message(ADMIN_ID, f"Error: {e}")
 
 @bot.callback_query_handler(func=lambda call: call.data == "stats")
 def stats(call):
-    total_users = users_col.count_documents({})
-    total_vip = users_col.count_documents({'is_vip': True})
-    text = f"📊 **إحصائيات البوت:**\n\n👥 عدد المستخدمين: {total_users}\n👑 أعضاء VIP: {total_vip}"
-    bot.send_message(call.message.chat.id, text, parse_mode="Markdown")
+    try:
+        total_users = users_col.count_documents({})
+        total_vip = users_col.count_documents({'is_vip': True})
+        text = f"📊 **الإحصائيات:**\n\n👥 المستخدمين: {total_users}\n👑 VIP: {total_vip}"
+        bot.send_message(call.message.chat.id, text, parse_mode="Markdown")
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"Error: {e}")
 
 # --- تشغيل السيرفر ---
 @app.route('/', methods=['POST'])
